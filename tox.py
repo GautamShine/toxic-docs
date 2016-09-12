@@ -130,13 +130,16 @@ class DataProcessor():
     """
     def split_data(self, y_all, X_all, split=0.7, seed=0):
         
+        y_unlab = y_all[y_all == -1]
+        X_unlab = X_all[(y_all == -1).flatten()]
+
         y_valid = y_all[y_all != -1]
         X_valid = X_all[(y_all != -1).flatten()]
 
         X_train, X_test, y_train, y_test = \
                 train_test_split(X_valid, y_valid, train_size=split, random_state=seed)
 
-        return y_train, X_train, y_test, X_test
+        return y_train, X_train, y_test, X_test, y_unlab, X_unlab
 
 
 class ModelEvaluator():
@@ -185,24 +188,25 @@ class ModelEvaluator():
 """
 Propagates labels to unlabeled data points for semisupervised learning
 """
-class Propagator():
+class LabelPropagator():
 
     """
     Scalarizes the vector of distances from hyperplane to a confidence measure
     """
-    def confidence_score(self, hp_dists):
+    def confidence_scores(self, hp_dists):
 
-        # TODO: vectorize this
-        ranking = np.argsort(hp_dists)
-        return hp_dists[ranking[0]] - hp_dists[ranking[1]]
+        ranking = np.argsort(-hp_dists, axis=1)
+        return hp_dists[np.arange(ranking.shape[0]), ranking[:,0]] -\
+                hp_dists[np.arange(ranking.shape[0]), ranking[:,1]]
 
     """
     Assigns labels where confidence exceeds a given threshold
     """
-    def propagate_labels(self, X_unlabeled, conf_scores, conf_threshold=1.5):
+    def propagate_labels(self, y_pred, conf_scores, conf_threshold=1.5):
 
-        # TODO: implement
-        y_labeled = -np.ones((X_unlabeled.shape[0],1))
+        y_labeled = -np.ones((y_pred.shape[0],1))
+        y_labeled[conf_scores > conf_threshold] = y_pred[conf_scores > conf_threshold]
+
         return y_labeled
 
 
@@ -222,7 +226,7 @@ if __name__ == '__main__':
     vectorizer, X_all, feat_names = dp.vectorize(docs, text_key, min_df=2, max_ngram=2)
     vec_time = time.time() - t0
 
-    y_train, X_train, y_test, X_test = dp.split_data(y_all, X_all, split=0.7, seed=0)
+    y_train, X_train, y_test, X_test, y_unlab, X_unlab = dp.split_data(y_all, X_all, split=0.7, seed=0)
     me = ModelEvaluator()
 
     print('Vectorization time:', vec_time)
@@ -253,11 +257,20 @@ if __name__ == '__main__':
     hp_dists = SVM.decision_function(X_train)
 
     # SVM - linear, class-weighted
-    SVMcw = SVC(kernel='linear', class_weight='balanced')
+    SVMcw = LinearSVC(class_weight='balanced')
     SVMcw_train_acc, SVMcw_train_time = me.train(SVMcw, y_train, X_train)
     SVMcw_test_acc, SVMcw_test_prec, SVMcw_test_rec, SVMcw_test_time = me.test(SVMcw, y_test, X_test)
     print('SVMcw time:', SVMcw_train_time)
     me.print_scores(dp, SVMcw_test_acc, SVMcw_test_prec, SVMcw_test_rec)
+
+    # Propagate labels
+    lp = LabelPropagator()
+    hp_dists = SVMlin.decision_function(X_unlab)
+    conf_scores = lp.confidence_scores(hp_dists)
+    y_pred = SVMlin.predict(X_unlab).reshape(-1,1)
+    y_est = lp.propagate_labels(y_pred, conf_scores, conf_threshold=1.5)
+
+    print(y_est.shape[0], np.sum(y_est != -1))
 
     x = np.arange(len(counts))
     y = counts.values()
