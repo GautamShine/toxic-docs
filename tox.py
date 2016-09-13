@@ -22,11 +22,9 @@ from matplotlib import pyplot as plt, rcParams
 from spacy.en import English
 
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.semi_supervised import LabelPropagation, LabelSpreading
-#from sklearn.naive_bayes import MultinomialNB, BernoulliNB
-#from sklearn.svm import SVC
 from sklearn.svm import LinearSVC
 from sklearn.cross_validation import train_test_split
+from sklearn.grid_search import GridSearchCV
 from sklearn import metrics
 
 """
@@ -151,8 +149,8 @@ class DataProcessor():
         y_valid = y_all[y_all != -1]
         X_valid = X_all[(y_all != -1).flatten()]
 
-        X_train, X_test, y_train, y_test = \
-                train_test_split(X_valid, y_valid, train_size=split, random_state=seed)
+        X_train, X_test, y_train, y_test = train_test_split(X_valid, y_valid,\
+                train_size=split, random_state=seed)
 
         return y_train, X_train, y_test, X_test, X_unlab
 
@@ -176,6 +174,18 @@ class ModelEvaluator():
         train_score = model.score(X_train, y_train)
 
         return train_score, train_time
+
+    """
+    Performs a hyperparameter search with cross validation
+    """
+    def param_search(self, model, param_grid, y_train, X_train, num_folds=5):
+
+        t0 = time.time()
+        grid = GridSearchCV(model, param_grid, cv=num_folds)
+        grid.fit(X_train, y_train)
+        grid_time = time.time() - t0
+
+        return grid.grid_scores_, grid.best_params_, grid_time
 
     """
     Tests a given fitted classifier
@@ -299,9 +309,20 @@ if __name__ == '__main__':
     print(dp.label_dict, '\n')
 
     # LinearSVC (liblinear SVM implementation, one-v-all)
-    # TODO: test hyperparameters, test class balancing
+    cross_validate = True
+    if cross_validate:
+        model = LinearSVC(penalty='l2', loss='squared_hinge', dual=True, tol=0.0001,\
+            C=1, multi_class='ovr', fit_intercept=True, intercept_scaling=1,\
+            class_weight=None, verbose=0, random_state=None, max_iter=1000)
+        param_grid = {'C':np.logspace(-4,2,24).tolist()}
+        grid_info, grid_best, grid_time = me.param_search(model, param_grid,\
+                y_train, X_train, num_folds=10)
+        C = grid_best['C']
+    else:
+        C = 1
+
     SVM = LinearSVC(penalty='l2', loss='squared_hinge', dual=True, tol=0.0001,\
-            C=1.0, multi_class='ovr', fit_intercept=True, intercept_scaling=1,\
+            C=C, multi_class='ovr', fit_intercept=True, intercept_scaling=1,\
             class_weight=None, verbose=0, random_state=None, max_iter=1000)
 
     SVM_test_acc, SVM_test_prec, SVM_test_rec, SVM_test_time = me.test(SVM, y_test, X_test)
