@@ -34,8 +34,9 @@ NLP functions (NER, lemmatization) for obtaining clean tokens
 """
 class NLP():
 
-    def __init__(self):
+    def __init__(self, num_chars):
         self.spacy = English()
+        self.num_chars = num_chars
 
     """
     Normalizes emails, people, places, and organizations
@@ -65,7 +66,7 @@ class NLP():
     """
     def tokenizer(self, doc):
         try:
-            spacy_doc = self.spacy(doc[:300])
+            spacy_doc = self.spacy(doc[:self.num_chars])
             return [self.preprocessor(t) for t in spacy_doc \
                     if (t.is_alpha or t.like_email) \
                     and len(t) < 50 and len(t) > 2 \
@@ -80,9 +81,9 @@ Data transformation functions to go from database dump to text features
 """
 class DataProcessor():
 
-    def __init__(self):
-        self.nlp = NLP()
-        self.label_dict = {'email' : 0, 'internal_memo': 1,
+    def __init__(self, num_chars):
+        self.nlp = NLP(num_chars)
+        self.label_dict = {'email': 0, 'internal_memo': 1,
                 'boardroom_minutes': 2, 'annual_report': 3,
                 'public_relations': 4, 'general_correspondance': 5,
                 'newspaper_article': 6,'deposition': 7,
@@ -95,7 +96,7 @@ class DataProcessor():
     Takes a bson and returns the corresponding list of dicts, the frequency of
     each label, and the number of unlabeled items
     """
-    def load_bson(self, bson_file, label_key):
+    def load_bson(self, bson_file, label_key, plot_hist=False):
 
         # 'rb' for read as binary
         f = open(bson_file, 'rb')
@@ -111,6 +112,20 @@ class DataProcessor():
             except:
                 labels[i] = -1
                 counts['unlabeled'] += 1
+
+        if(plot_hist):
+
+            x = np.arange(len(counts))
+            y = counts.values()
+            ymax = max(y)*1.1
+
+            plt.figure()
+            plt.bar(x, y, align='center', width=0.5)
+            plt.ylim(0, ymax)
+            plt.xticks(x, counts.keys(), rotation=45, ha='right')
+            rcParams.update({'figure.autolayout': True, 'font.size': 30})
+
+            plt.show()
 
         return docs, labels, counts
 
@@ -142,6 +157,9 @@ class DataProcessor():
         return y_train, X_train, y_test, X_test, X_unlab
 
 
+"""
+Utility functions for training and testing sklearn models
+"""
 class ModelEvaluator():
 
     def __init__(self):
@@ -188,7 +206,7 @@ class ModelEvaluator():
 """
 Propagates labels to unlabeled data points for semisupervised learning
 """
-class SemisupervisedLearner():
+class SemiSupervisedLearner():
 
     def __init__(self, model):
         self.model = model
@@ -235,7 +253,27 @@ class SemisupervisedLearner():
                     y_working, X_working, y_pred, X_unlab,\
                     conf_scores, conf_thresh=conf_thresh)
 
-            print(y_working.shape, X_unlab.shape)
+            print(y_working.shape, X_unlab.shape[0])
+
+        return y_working
+
+"""
+Utility functions for plotting data
+"""
+def class_hist(y, labels):
+
+    counts = np.bincount(y)
+
+    x = np.arange(len(counts))
+    ymax = max(counts)*1.1
+
+    plt.figure()
+    plt.bar(x, counts, align='center', width=0.5)
+    plt.ylim(0, ymax)
+    plt.xticks(x, labels, rotation=45, ha='right')
+    rcParams.update({'figure.autolayout': True, 'font.size': 25})
+
+    plt.show()
 
 """
 Main
@@ -247,7 +285,7 @@ if __name__ == '__main__':
     text_key = 'text'
 
     # Process the raw data
-    dp = DataProcessor()
+    dp = DataProcessor(num_chars=300)
     docs, y_all, counts = dp.load_bson(bson_file, label_key)
     t0 = time.time()
     vectorizer, X_all, feat_names = dp.vectorize(docs, text_key, min_df=2, max_ngram=2)
@@ -270,19 +308,9 @@ if __name__ == '__main__':
     me.print_scores(dp, SVM_test_acc, SVM_test_prec, SVM_test_rec)
 
     # Perform semisupervised learning
-    ssl = SemisupervisedLearner(SVM)
-    ssl.loop_learning(X_unlab, y_train, X_train, num_loops=10, conf_thresh=1.5)
+    ssl = SemiSupervisedLearner(SVM)
+    ave_conf = np.mean(ssl.confidence_scores(SVM.decision_function(X_train)))
+    y_working = ssl.loop_learning(X_unlab, y_train, X_train, num_loops=10, conf_thresh=ave_conf)
 
     SSL_test_acc, SSL_test_prec, SSL_test_rec, SSL_test_time = me.test(SVM, y_test, X_test)
     me.print_scores(dp, SSL_test_acc, SSL_test_prec, SSL_test_rec)
-
-    x = np.arange(len(counts))
-    y = counts.values()
-    ymax = max(y)*1.1
-
-    plt.bar(x, y, align='center', width=0.5)
-    plt.ylim(0, ymax)
-    plt.xticks(x, counts.keys(), rotation=45, ha='right')
-    rcParams.update({'figure.autolayout': True, 'font.size': 30})
-
-    #plt.show()
