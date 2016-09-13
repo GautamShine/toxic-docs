@@ -17,12 +17,13 @@ import re
 from collections import defaultdict
 
 import numpy as np
+from scipy import sparse as sp
 from matplotlib import pyplot as plt, rcParams
 from spacy.en import English
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.semi_supervised import LabelPropagation, LabelSpreading
-from sklearn.naive_bayes import MultinomialNB, BernoulliNB
+#from sklearn.naive_bayes import MultinomialNB, BernoulliNB
 #from sklearn.svm import SVC
 from sklearn.svm import LinearSVC
 from sklearn.cross_validation import train_test_split
@@ -130,7 +131,6 @@ class DataProcessor():
     """
     def split_data(self, y_all, X_all, split=0.7, seed=0):
         
-        y_unlab = y_all[y_all == -1]
         X_unlab = X_all[(y_all == -1).flatten()]
 
         y_valid = y_all[y_all != -1]
@@ -139,7 +139,7 @@ class DataProcessor():
         X_train, X_test, y_train, y_test = \
                 train_test_split(X_valid, y_valid, train_size=split, random_state=seed)
 
-        return y_train, X_train, y_test, X_test, y_unlab, X_unlab
+        return y_train, X_train, y_test, X_test, X_unlab
 
 
 class ModelEvaluator():
@@ -188,7 +188,10 @@ class ModelEvaluator():
 """
 Propagates labels to unlabeled data points for semisupervised learning
 """
-class LabelPropagator():
+class SemisupervisedLearner():
+
+    def __init__(self, model):
+        self.model = model
 
     """
     Scalarizes the vector of distances from hyperplane to a confidence measure
@@ -200,15 +203,39 @@ class LabelPropagator():
                 hp_dists[np.arange(ranking.shape[0]), ranking[:,1]]
 
     """
-    Assigns labels where confidence exceeds a given threshold
+    Grows training set using high confidence predictions from unlabeled set
     """
-    def propagate_labels(self, y_pred, conf_scores, conf_threshold=1.5):
+    def propagate_labels(self, y_working, X_working, y_pred, X_unlab,\
+            conf_scores, conf_thresh=1.5):
 
-        y_labeled = -np.ones((y_pred.shape[0],1))
-        y_labeled[conf_scores > conf_threshold] = y_pred[conf_scores > conf_threshold]
+        add_set = conf_scores > conf_thresh
+        y_working = np.concatenate((y_working, y_pred[add_set]))
+        X_working = sp.vstack((X_working, X_unlab[add_set]))
+        X_unlab = X_unlab[~add_set]
 
-        return y_labeled
+        return y_working, X_working, X_unlab
 
+    """
+    Iterates the model and data to grow the training set using soft labels
+    """
+    def loop_learning(self, X_unlab, y_train, X_train, num_loops, conf_thresh):
+
+        X_working = X_train.copy()
+        y_working = y_train.copy()
+
+        for i in range(num_loops):
+
+            self.model.fit(X_working, y_working)
+
+            hp_dists = self.model.decision_function(X_unlab)
+            y_pred = np.argmax(hp_dists, axis=1)
+            conf_scores = self.confidence_scores(hp_dists)
+
+            y_working, X_working, X_unlab = self.propagate_labels(\
+                    y_working, X_working, y_pred, X_unlab,\
+                    conf_scores, conf_thresh=conf_thresh)
+
+            print(y_working.shape, X_unlab.shape)
 
 """
 Main
@@ -226,51 +253,28 @@ if __name__ == '__main__':
     vectorizer, X_all, feat_names = dp.vectorize(docs, text_key, min_df=2, max_ngram=2)
     vec_time = time.time() - t0
 
-    y_train, X_train, y_test, X_test, y_unlab, X_unlab = dp.split_data(y_all, X_all, split=0.7, seed=0)
+    y_train, X_train, y_test, X_test, X_unlab = dp.split_data(y_all, X_all, split=0.7, seed=0)
     me = ModelEvaluator()
 
     print('Vectorization time:', vec_time)
     print('Data matrix size:', X_all.shape)
     print(dp.label_dict, '\n')
 
-    # Multinomial Naive Bayes
-    MNB = MultinomialNB()
-    MNB_train_acc, MNB_train_time = me.train(MNB, y_train, X_train)
-    MNB_test_acc, MNB_test_prec, MNB_test_rec, MNB_test_time = me.test(MNB, y_test, X_test)
-    print('MNB time:', MNB_train_time)
-    me.print_scores(dp, MNB_test_acc, MNB_test_prec, MNB_test_rec)
-
-    # Bernoulli Naive Bayes
-    BNB = BernoulliNB()
-    BNB_train_acc, BNB_train_time = me.train(BNB, y_train, X_train)
-    BNB_test_acc, BNB_test_prec, BNB_test_rec, BNB_test_time = me.test(BNB, y_test, X_test)
-    print('BNB time:', BNB_train_time)
-    me.print_scores(dp, BNB_test_acc, BNB_test_prec, BNB_test_rec)
-
     # LinearSVC (liblinear SVM implementation, one-v-all)
-    # TODO: test hyperparameters
-    SVM = LinearSVC()
-    SVM_train_acc, SVM_train_time = me.train(SVM, y_train, X_train)
+    # TODO: test hyperparameters, test class balancing
+    SVM = LinearSVC(penalty='l2', loss='squared_hinge', dual=True, tol=0.0001,\
+            C=1.0, multi_class='ovr', fit_intercept=True, intercept_scaling=1,\
+            class_weight=None, verbose=0, random_state=None, max_iter=1000)
+
     SVM_test_acc, SVM_test_prec, SVM_test_rec, SVM_test_time = me.test(SVM, y_test, X_test)
-    print('SVM time:', SVM_train_time)
     me.print_scores(dp, SVM_test_acc, SVM_test_prec, SVM_test_rec)
-    hp_dists = SVM.decision_function(X_train)
 
-    # SVM - linear, class-weighted
-    SVMcw = LinearSVC(class_weight='balanced')
-    SVMcw_train_acc, SVMcw_train_time = me.train(SVMcw, y_train, X_train)
-    SVMcw_test_acc, SVMcw_test_prec, SVMcw_test_rec, SVMcw_test_time = me.test(SVMcw, y_test, X_test)
-    print('SVMcw time:', SVMcw_train_time)
-    me.print_scores(dp, SVMcw_test_acc, SVMcw_test_prec, SVMcw_test_rec)
+    # Perform semisupervised learning
+    ssl = SemisupervisedLearner(SVM)
+    ssl.loop_learning(X_unlab, y_train, X_train, num_loops=10, conf_thresh=1.5)
 
-    # Propagate labels
-    lp = LabelPropagator()
-    hp_dists = SVMlin.decision_function(X_unlab)
-    conf_scores = lp.confidence_scores(hp_dists)
-    y_pred = SVMlin.predict(X_unlab).reshape(-1,1)
-    y_est = lp.propagate_labels(y_pred, conf_scores, conf_threshold=1.5)
-
-    print(y_est.shape[0], np.sum(y_est != -1))
+    SSL_test_acc, SSL_test_prec, SSL_test_rec, SSL_test_time = me.test(SVM, y_test, X_test)
+    me.print_scores(dp, SSL_test_acc, SSL_test_prec, SSL_test_rec)
 
     x = np.arange(len(counts))
     y = counts.values()
