@@ -150,15 +150,20 @@ class DataProcessor():
     """
     def split_data(self, y_all, X_all, split=0.7, seed=0):
         
+        indices = np.arange(y_all.shape[0])
+
         X_unlab = X_all[(y_all == -1).flatten()]
+        ind_unlab = indices[(y_all == -1).flatten()]
 
         y_valid = y_all[y_all != -1]
         X_valid = X_all[(y_all != -1).flatten()]
+        ind_valid = indices[(y_all != -1).flatten()]
 
-        X_train, X_test, y_train, y_test = train_test_split(X_valid, y_valid,\
+        X_train, X_test, y_train, y_test, ind_train, ind_test =\
+                train_test_split(X_valid, y_valid, ind_valid,\
                 train_size=split, random_state=seed)
 
-        return y_train, X_train, y_test, X_test, X_unlab
+        return y_train, X_train, ind_train, y_test, X_test, ind_test, X_unlab, ind_unlab
 
 
 """
@@ -300,7 +305,7 @@ class DataAnalyzer():
     """
     Plot histogram of classes given a y vector
     """
-    def class_hist(self, y, labels):
+    def class_hist(self, y, labels, show_now=False):
 
         counts = np.bincount(y)
 
@@ -313,6 +318,9 @@ class DataAnalyzer():
         plt.ylim(0, ymax)
         plt.xticks(x, labels, rotation=45, ha='right')
         rcParams.update({'figure.autolayout': True, 'font.size': 25})
+
+        if(show_now):
+            plt.show()
 
         return
 
@@ -346,13 +354,24 @@ class DataAnalyzer():
     """
     Randomly sample a few documents from a given class labeled correctly or not
     """
-    def sample_docs(self, docs, y, y_pred, target_y, pred_correct=False, num_docs=3, seed=0):
+    def sample_docs(self, docs, text_key, y, y_pred, y_inds, target_y,\
+            misclassified=None, num_docs=3, seed=0, num_chars=100):
 
-        sample_inds = []
+        target_inds = (y == target_y)
+
+        if misclassified is True:
+            target_inds *= (y != y_pred)
+
+        elif misclassified is False:
+            target_inds *= (y == y_pred)
+
+        np.random.seed(seed)
+        sample_inds = np.random.choice(y_inds[target_inds], size=num_docs, replace=False)
 
         for i in range(num_docs):
-
-            print(docs[sample_inds[i]])
+            print('\n\n\n', sample_inds[i], '\n**********\n',\
+                    docs[sample_inds[i]][text_key][:num_chars], '\n\n\n',\
+                    docs[sample_inds[i]][text_key][-num_chars:])
 
         return
 
@@ -373,7 +392,8 @@ if __name__ == '__main__':
     vectorizer, X_all, feat_names = dp.vectorize(docs, text_key, min_df=2, max_ngram=2)
     vec_time = time.time() - t0
 
-    y_train, X_train, y_test, X_test, X_unlab = dp.split_data(y_all, X_all, split=0.7, seed=0)
+    y_train, X_train, ind_train, y_test, X_test, ind_test, X_unlab, ind_unlab =\
+            dp.split_data(y_all, X_all, split=0.7, seed=0)
     me = ModelEvaluator()
 
     print('Vectorization time:', vec_time)
