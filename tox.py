@@ -20,6 +20,7 @@ import numpy as np
 from scipy import sparse as sp
 from matplotlib import pyplot as plt, rcParams
 from spacy.en import English
+import pandas as pd
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.svm import LinearSVC
@@ -63,8 +64,13 @@ class NLP():
     Tokenizes input string with preprocessing
     """
     def tokenizer(self, doc):
+
         try:
-            spacy_doc = self.spacy(doc[:self.num_chars])
+            if len(doc) > 2*self.num_chars:
+                spacy_doc = self.spacy(doc[:self.num_chars] + doc[-self.num_chars:])
+            else:
+                spacy_doc = self.spacy(doc)
+                
             return [self.preprocessor(t) for t in spacy_doc \
                     if (t.is_alpha or t.like_email) \
                     and len(t) < 50 and len(t) > 2 \
@@ -199,18 +205,24 @@ class ModelEvaluator():
         test_precision = metrics.precision_score(y_test, y_pred, average=None)
         test_recall = metrics.recall_score(y_test, y_pred, average=None)
 
-        return test_accuracy, test_precision, test_recall, test_time
+        return y_pred, test_accuracy, test_precision, test_recall, test_time
 
     """
     Utility function for printing class-wise precision/recall
     """
     def print_scores(self, dp, acc, prec, rec):
 
+        scores = np.array([[2/(1/prec[i] + 1/rec[i]), prec[i], rec[i]] \
+                for i in range(len(prec))])
+
         print('Accuracy:', acc)
+        print('Mean F1:', np.mean(scores[:,0]))
         for i in range(len(prec)):
             print('{0} \n F1: {1: .3f}, P: {2: .3f}, R: {3: .3f}, '.format( \
-                    dp.inv_label_dict[i], 2/(1/prec[i] + 1/rec[i]), prec[i], rec[i]))
+                    dp.inv_label_dict[i], scores[i][0], scores[i][1], scores[i][2]))
         print('\n')
+
+        return
 
 
 """
@@ -267,23 +279,83 @@ class SemiSupervisedLearner():
 
         return y_working
 
+
 """
-Utility functions for plotting data
+Utility functions for understanding and visualizing the data
 """
-def class_hist(y, labels):
+class DataAnalyzer():
 
-    counts = np.bincount(y)
+    def __init__(self):
+        self.fig_num = -1
 
-    x = np.arange(len(counts))
-    ymax = max(counts)*1.1
+    """
+    Show all plots
+    """
+    def show_plots(self):
 
-    plt.figure()
-    plt.bar(x, counts, align='center', width=0.5)
-    plt.ylim(0, ymax)
-    plt.xticks(x, labels, rotation=45, ha='right')
-    rcParams.update({'figure.autolayout': True, 'font.size': 25})
+        plt.show()
 
-    plt.show()
+        return
+
+    """
+    Plot histogram of classes given a y vector
+    """
+    def class_hist(self, y, labels):
+
+        counts = np.bincount(y)
+
+        x = np.arange(len(counts))
+        ymax = max(counts)*1.1
+
+        self.fig_num += 1
+        plt.figure(self.fig_num)
+        plt.bar(x, counts, align='center', width=0.5)
+        plt.ylim(0, ymax)
+        plt.xticks(x, labels, rotation=45, ha='right')
+        rcParams.update({'figure.autolayout': True, 'font.size': 25})
+
+        return
+
+    """
+    Returns mean confidence of each class 
+    """
+    def class_confidence(self, y, conf_scores):
+
+        df = pd.DataFrame({'y': y, 'cs': conf_scores})
+        class_confs = df.groupby('y').mean()
+        class_confs = class_confs.as_matrix()
+
+        return class_confs
+
+    """
+    Retrieve the most important features for predicting a given class
+    """
+    def important_feats(self, model, feat_names, labels, num_feats=5):
+
+        feat_ranking = np.argsort(-model.coef_, axis=1)
+        if type(feat_names) is list:
+            feat_names = np.array(feat_names)
+
+        for i in range(len(labels)):
+
+            print(labels[i])
+            print(feat_names[feat_ranking[i,:]][:num_feats])
+
+        return
+
+    """
+    Randomly sample a few documents from a given class labeled correctly or not
+    """
+    def sample_docs(self, docs, y, y_pred, target_y, pred_correct=False, num_docs=3, seed=0):
+
+        sample_inds = []
+
+        for i in range(num_docs):
+
+            print(docs[sample_inds[i]])
+
+        return
+
 
 """
 Main
@@ -313,8 +385,8 @@ if __name__ == '__main__':
     if cross_validate:
         model = LinearSVC(penalty='l2', loss='squared_hinge', dual=True, tol=0.0001,\
             C=1, multi_class='ovr', fit_intercept=True, intercept_scaling=1,\
-            class_weight=None, verbose=0, random_state=None, max_iter=1000)
-        param_grid = {'C':np.logspace(-4,2,24).tolist()}
+            class_weight='balanced', verbose=0, random_state=None, max_iter=1000)
+        param_grid = {'C':np.logspace(-2,2,24).tolist()}
         grid_info, grid_best, grid_time = me.param_search(model, param_grid,\
                 y_train, X_train, num_folds=10)
         C = grid_best['C']
@@ -323,9 +395,9 @@ if __name__ == '__main__':
 
     SVM = LinearSVC(penalty='l2', loss='squared_hinge', dual=True, tol=0.0001,\
             C=C, multi_class='ovr', fit_intercept=True, intercept_scaling=1,\
-            class_weight=None, verbose=0, random_state=None, max_iter=1000)
+            class_weight='balanced', verbose=0, random_state=None, max_iter=1000)
 
-    SVM_test_acc, SVM_test_prec, SVM_test_rec, SVM_test_time = me.test(SVM, y_test, X_test)
+    SVM_y_pred, SVM_test_acc, SVM_test_prec, SVM_test_rec, SVM_test_time = me.test(SVM, y_test, X_test)
     me.print_scores(dp, SVM_test_acc, SVM_test_prec, SVM_test_rec)
 
     # Perform semisupervised learning
@@ -333,5 +405,5 @@ if __name__ == '__main__':
     ave_conf = np.mean(ssl.confidence_scores(SVM.decision_function(X_train)))
     y_working = ssl.loop_learning(X_unlab, y_train, X_train, num_loops=10, conf_thresh=ave_conf)
 
-    SSL_test_acc, SSL_test_prec, SSL_test_rec, SSL_test_time = me.test(SVM, y_test, X_test)
+    SSL_y_pred, SSL_test_acc, SSL_test_prec, SSL_test_rec, SSL_test_time = me.test(SVM, y_test, X_test)
     me.print_scores(dp, SSL_test_acc, SSL_test_prec, SSL_test_rec)
