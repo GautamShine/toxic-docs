@@ -15,6 +15,7 @@ import bson
 import time
 import re
 from collections import defaultdict
+from copy import deepcopy
 
 import numpy as np
 from scipy import sparse as sp
@@ -23,6 +24,9 @@ from spacy.en import English
 import pandas as pd
 
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction import DictVectorizer
+from sklearn.preprocessing import normalize, scale
+
 from sklearn.svm import LinearSVC
 from sklearn.cross_validation import train_test_split
 from sklearn.grid_search import GridSearchCV
@@ -142,10 +146,36 @@ class DataProcessor():
     def vectorize(self, docs, min_df=2, max_ngram=2):
 
         docs = [x[self.text_key] for x in docs]
-        vectorizer = TfidfVectorizer(min_df=min_df, \
-                ngram_range=(1, max_ngram), tokenizer=self.nlp.tokenizer)
+        vectorizer = TfidfVectorizer(min_df=min_df,\
+                ngram_range=(1, max_ngram), tokenizer=self.nlp.tokenizer, sublinear_tf=True)
 
         return vectorizer, vectorizer.fit_transform(docs), vectorizer.get_feature_names()
+
+    """
+    Retrieves document features of the ToxicDocs collection
+    """
+    def get_feats(self, docs, key_list):
+
+        feats = []
+        for doc in docs:
+            feats.append({k:v for k,v in doc.items() if k in key_list})
+            feats[-1]['num_pages'] = 1+np.log(feats[-1]['num_pages'])
+            feats[-1]['length'] = 1+np.log(len(doc[self.text_key]))
+
+        vectorizer = DictVectorizer()
+        X_feats = vectorizer.fit_transform(feats)
+        X_feats = normalize(X_feats, axis=0, norm='max')
+
+        return X_feats
+
+    """
+    Stacks extra features onto given data matrix
+    """
+    def stack_feats(self, X, feats):
+
+        X = sp.hstack((X, feats))
+
+        return X.tocsr()
 
     """
     Splits the labeled subset into train and test sets
@@ -428,6 +458,11 @@ if __name__ == '__main__':
     t0 = time.time()
     vectorizer, X_all, feat_names = dp.vectorize(docs, min_df=2, max_ngram=2)
     vec_time = time.time() - t0
+
+    # Add extra features from ToxicDocs to n-gram data matrix
+    key_list = ['num_pages']
+    feats = dp.get_feats(docs, key_list)
+    X_all = dp.stack_feats(X_all, feats)
 
     y_train, X_train, ind_train, y_test, X_test, ind_test, X_unlab, ind_unlab =\
             dp.split_data(y_all, X_all, split=0.7, seed=0)
