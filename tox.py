@@ -285,7 +285,15 @@ class SemiSupervisedLearner():
     def propagate_labels(self, y_working, X_working, y_pred, X_unlab,\
             conf_scores, conf_thresh=1.5):
 
-        add_set = conf_scores > conf_thresh
+        if type(conf_thresh) is not float:
+            # differing thresholds for classes
+            add_set = np.zeros_like(y_pred, dtype=bool)
+            for i in range(conf_thresh.shape[0]):
+                add_set[(conf_scores > conf_thresh[i]) * (y_pred == i)] = True
+        else:
+            # same threshold for all classes
+            add_set = conf_scores > conf_thresh
+
         y_working = np.concatenate((y_working, y_pred[add_set]))
         X_working = sp.vstack((X_working, X_unlab[add_set]))
         X_unlab = X_unlab[~add_set]
@@ -345,7 +353,7 @@ class DataAnalyzer():
     """
     Plot histogram of classes given a y vector
     """
-    def class_hist(self, y, labels, show_now=False):
+    def class_hist(self, y, labels, print_hist, show_now=False):
 
         counts = np.bincount(y)
 
@@ -359,7 +367,10 @@ class DataAnalyzer():
         plt.xticks(x, labels, rotation=45, ha='right')
         rcParams.update({'figure.autolayout': True, 'font.size': 25})
 
-        if(show_now):
+        if print_hist:
+            print(counts)
+
+        if show_now:
             plt.show()
 
         return
@@ -456,13 +467,13 @@ if __name__ == '__main__':
     da = DataAnalyzer(text_key)
     docs, y_all, counts = dp.load_bson(bson_file)
     t0 = time.time()
-    vectorizer, X_all, feat_names = dp.vectorize(docs, min_df=2, max_ngram=2)
+    vectorizer, X_all_ngram, feat_names = dp.vectorize(docs, min_df=2, max_ngram=2)
     vec_time = time.time() - t0
 
     # Add extra features from ToxicDocs to n-gram data matrix
     key_list = ['num_pages']
     feats = dp.get_feats(docs, key_list)
-    X_all = dp.stack_feats(X_all, feats)
+    X_all = dp.stack_feats(X_all_ngram, feats)
 
     y_train, X_train, ind_train, y_test, X_test, ind_test, X_unlab, ind_unlab =\
             dp.split_data(y_all, X_all, split=0.7, seed=0)
