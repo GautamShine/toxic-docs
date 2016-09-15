@@ -85,7 +85,9 @@ Data transformation functions to go from database dump to text features
 """
 class DataProcessor():
 
-    def __init__(self, num_chars):
+    def __init__(self, text_key, label_key, num_chars):
+        self.text_key = text_key
+        self.label_key = label_key
         self.nlp = NLP(num_chars)
         self.label_dict = {'email': 0, 'internal_memo': 1,
                 'boardroom_minutes': 2, 'annual_report': 3,
@@ -100,7 +102,7 @@ class DataProcessor():
     Takes a bson and returns the corresponding list of dicts, the frequency of
     each label, and the number of unlabeled items
     """
-    def load_bson(self, bson_file, label_key, plot_hist=False):
+    def load_bson(self, bson_file, plot_hist=False):
 
         # 'rb' for read as binary
         f = open(bson_file, 'rb')
@@ -111,8 +113,8 @@ class DataProcessor():
 
         for i in range(len(docs)):
             try:
-                labels[i] = self.label_dict[docs[i][label_key]]
-                counts[docs[i][label_key]] += 1
+                labels[i] = self.label_dict[docs[i][self.label_key]]
+                counts[docs[i][self.label_key]] += 1
             except:
                 labels[i] = -1
                 counts['unlabeled'] += 1
@@ -137,9 +139,9 @@ class DataProcessor():
     Applies a TF-IDF transformer and count vectorizer to the corpus to build
     n-gram features for classification
     """
-    def vectorize(self, docs, text_key, min_df=2, max_ngram=2):
+    def vectorize(self, docs, min_df=2, max_ngram=2):
 
-        docs = [x[text_key] for x in docs]
+        docs = [x[self.text_key] for x in docs]
         vectorizer = TfidfVectorizer(min_df=min_df, \
                 ngram_range=(1, max_ngram), tokenizer=self.nlp.tokenizer)
 
@@ -223,7 +225,7 @@ class ModelEvaluator():
         print('Accuracy:', acc)
         print('Mean F1:', np.mean(scores[:,0]))
         for i in range(len(prec)):
-            print('{0} \n F1: {1: .3f}, P: {2: .3f}, R: {3: .3f}, '.format( \
+            print('{0} \n F1: {1:.3f}, P: {2:.3f}, R: {3:.3f}, '.format( \
                     dp.inv_label_dict[i], scores[i][0], scores[i][1], scores[i][2]))
         print('\n')
 
@@ -267,6 +269,7 @@ class SemiSupervisedLearner():
 
         X_working = X_train.copy()
         y_working = y_train.copy()
+        num_added = 0
 
         for i in range(num_loops):
 
@@ -276,11 +279,17 @@ class SemiSupervisedLearner():
             y_pred = np.argmax(hp_dists, axis=1)
             conf_scores = self.confidence_scores(hp_dists)
 
+            y_size_old = y_working.shape[0]
             y_working, X_working, X_unlab = self.propagate_labels(\
                     y_working, X_working, y_pred, X_unlab,\
                     conf_scores, conf_thresh=conf_thresh)
 
-            print(y_working.shape, X_unlab.shape[0])
+            if y_size_old == y_working.shape[0]:
+                print('Converged with {0:d} added'.format(num_added))
+                break
+
+            num_added += y_working.shape[0] - y_size_old
+            print(num_added, y_working.shape[0], X_unlab.shape[0])
 
         return y_working
 
@@ -290,7 +299,8 @@ Utility functions for understanding and visualizing the data
 """
 class DataAnalyzer():
 
-    def __init__(self):
+    def __init__(self, text_key):
+        self.text_key = text_key
         self.fig_num = -1
 
     """
@@ -352,10 +362,22 @@ class DataAnalyzer():
         return
 
     """
+    Print a document
+    """
+    def print_doc(self, docs, doc_ind, num_chars=150):
+
+        print('\n\n\n', doc_ind, '\n**********\n',\
+            docs[doc_ind][self.text_key][:num_chars], '\n\n\n',\
+            docs[doc_ind][self.text_key][-num_chars:])
+
+        return
+
+
+    """
     Randomly sample a few documents from a given class labeled correctly or not
     """
-    def sample_docs(self, docs, text_key, y, y_pred, y_inds, target_y,\
-            misclassified=None, num_docs=3, seed=0, num_chars=100):
+    def sample_docs(self, docs, y, y_pred, y_inds, target_y,\
+            misclassified=None, num_docs=3, seed=0, num_chars=150):
 
         target_inds = (y == target_y)
 
@@ -369,11 +391,25 @@ class DataAnalyzer():
         sample_inds = np.random.choice(y_inds[target_inds], size=num_docs, replace=False)
 
         for i in range(num_docs):
-            print('\n\n\n', sample_inds[i], '\n**********\n',\
-                    docs[sample_inds[i]][text_key][:num_chars], '\n\n\n',\
-                    docs[sample_inds[i]][text_key][-num_chars:])
+            self.print_doc(docs, sample_inds[i], num_chars)
 
         return
+
+    """
+    Retrieves the most similar documents to a given target document using
+    similarity measured by inner product in n-gram space
+    """
+    def similar_docs(self, docs, X, target_ind, num_docs=5, print_docs=True, num_chars=150):
+
+        target_doc = X[target_ind, :].transpose()
+        doc_sims = np.dot(X, target_doc)
+        sim_ranking = np.argsort(-doc_sims.toarray().flatten())
+       
+        if print_docs:
+            for i in range(num_docs):
+                self.print_doc(docs, sim_ranking[i+1], num_chars)
+
+        return sim_ranking[1:(num_docs+1)]
 
 
 """
@@ -386,10 +422,11 @@ if __name__ == '__main__':
     text_key = 'text'
 
     # Process the raw data
-    dp = DataProcessor(num_chars=300)
-    docs, y_all, counts = dp.load_bson(bson_file, label_key)
+    dp = DataProcessor(text_key, label_key, num_chars=300)
+    da = DataAnalyzer(text_key)
+    docs, y_all, counts = dp.load_bson(bson_file)
     t0 = time.time()
-    vectorizer, X_all, feat_names = dp.vectorize(docs, text_key, min_df=2, max_ngram=2)
+    vectorizer, X_all, feat_names = dp.vectorize(docs, min_df=2, max_ngram=2)
     vec_time = time.time() - t0
 
     y_train, X_train, ind_train, y_test, X_test, ind_test, X_unlab, ind_unlab =\
