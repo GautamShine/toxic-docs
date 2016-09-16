@@ -15,13 +15,15 @@ import bson
 import time
 import re
 from collections import defaultdict
-from copy import deepcopy
 
 import numpy as np
 from scipy import sparse as sp
 from matplotlib import pyplot as plt, rcParams
 from spacy.en import English
+
 import pandas as pd
+from sqlalchemy import create_engine
+import psycopg2
 
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_extraction import DictVectorizer
@@ -138,6 +140,21 @@ class DataProcessor():
             plt.show()
 
         return docs, labels, counts
+
+    """
+    Writes the document dump (list of dicts) to a PostgresSQL table
+    """
+    def write_to_db(self, docs, user, pw, host, db_name):
+
+        db = create_engine('postgres://%s:%s@%s/%s'%\
+                (user, pw, host, db_name))
+        conn = psycopg2.connect(database=dbname, user=user)
+
+        df = pd.DataFrame(docs)
+        df['_id'] = df['_id'].map(str)
+        df.to_sql('toxic_docs_table', engine)
+
+        return
 
     """
     Applies a TF-IDF transformer and count vectorizer to the corpus to build
@@ -369,6 +386,31 @@ class DataAnalyzer():
 
         if print_hist:
             print(counts)
+
+        if show_now:
+            plt.show()
+
+        return
+
+    """
+    Plot scores of classes in a bar chart
+    """
+    def class_scores(self, scores, labels, show_now=False):
+
+        if type(scores) is tuple:
+            prec, rec = scores
+            scores = np.array([2/(1/prec[i] + 1/rec[i])\
+                    for i in range(len(prec))])
+
+        x = np.arange(len(labels))
+        ymax = max(scores)*1.1
+
+        self.fig_num += 1
+        plt.figure(self.fig_num)
+        plt.bar(x, scores, align='center', width=0.5)
+        plt.ylim(0, ymax)
+        plt.xticks(x, labels, rotation=45, ha='right')
+        rcParams.update({'figure.autolayout': True, 'font.size': 25})
 
         if show_now:
             plt.show()
