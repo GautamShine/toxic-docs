@@ -28,6 +28,7 @@ import psycopg2
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.preprocessing import normalize, scale
+from sklearn.learning_curve import learning_curve
 
 from sklearn.svm import LinearSVC
 from sklearn.cross_validation import train_test_split
@@ -98,10 +99,13 @@ class DataProcessor():
         self.label_dict = {'email': 0, 'internal_memo': 1,
                 'boardroom_minutes': 2, 'annual_report': 3,
                 'public_relations': 4, 'general_correspondance': 5,
-                'newspaper_article': 6,'deposition': 7,
+                'media': 6,'deposition': 7,
                 'scientific_article_unpublished': 8,
                 'scientific_article_published': 9,
-                'advertisement': 10, 'trade_association': 11}
+                'advertisement': 10, 'trade_association': 11,
+                'contract': 12, 'budget':13,
+                'court_transcript':14, 'general_report':15,
+                'not_english':18, 'misc':19, 'blank':20}
         self.inv_label_dict = {v: k for k, v in self.label_dict.items()}
 
     """
@@ -214,6 +218,18 @@ class DataProcessor():
 
         return y_train, X_train, ind_train, y_test, X_test, ind_test, X_unlab, ind_unlab
 
+    """
+    Merges given classes into one label for cases when sample size is small
+    """
+    def merge_classes(self, merge_arr, y):
+
+        y_merged = y.copy()
+        merged_dict = {}
+
+        for y_1, y_2 in merge_arr:
+            pass
+
+        return y_merged, merged_dict
 
 """
 Utility functions for training and testing sklearn models
@@ -250,16 +266,30 @@ class ModelEvaluator():
     """
     Tests a given fitted classifier
     """
-    def test(self, model, y_test, X_test):
+    def test(self, model, y_test, X_test, labels=None):
 
         t0 = time.time()
         y_pred = model.predict(X_test)
         test_time = time.time() - t0
         test_accuracy = metrics.accuracy_score(y_test, y_pred)
-        test_precision = metrics.precision_score(y_test, y_pred, average=None)
-        test_recall = metrics.recall_score(y_test, y_pred, average=None)
+        test_precision = metrics.precision_score(y_test, y_pred, labels=labels, average=None)
+        test_recall = metrics.recall_score(y_test, y_pred, labels=labels, average=None)
 
         return y_pred, test_accuracy, test_precision, test_recall, test_time
+
+    """
+    Traces a learning curve
+    """
+    def generate_learning_curve(self, model, X, y, splits=np.linspace(0.1,0.9,18), plot_curve=False):
+
+        train_sizes, train_scores, test_scores = learning_curve(model, X, y, splits)
+
+        if plot_curve:
+            plt.figure()
+            plt.plot(train_sizes, np.mean(test_scores, axis=1), color='red', linewidth=4)
+            plt.show()
+
+        return train_sizes, train_scores, test_scores
 
     """
     Utility function for printing class-wise precision/recall
@@ -269,11 +299,14 @@ class ModelEvaluator():
         scores = np.array([[2/(1/prec[i] + 1/rec[i]), prec[i], rec[i]] \
                 for i in range(len(prec))])
 
+        keys = list(dp.inv_label_dict.keys())
+
         print('Accuracy:', acc)
         print('Mean F1:', np.mean(scores[:,0]))
         for i in range(len(prec)):
+            label = dp.inv_label_dict[keys[i]]
             print('{0} \n F1: {1:.3f}, P: {2:.3f}, R: {3:.3f}, '.format( \
-                    dp.inv_label_dict[i], scores[i][0], scores[i][1], scores[i][2]))
+                    label, scores[i][0], scores[i][1], scores[i][2]))
         print('\n')
 
         return
@@ -407,6 +440,7 @@ class DataAnalyzer():
 
         self.fig_num += 1
         plt.figure(self.fig_num)
+        print(x, x.shape, scores, scores.shape)
         plt.bar(x, scores, align='center', width=0.5)
         plt.ylim(0, ymax)
         plt.xticks(x, labels, rotation=45, ha='right')
@@ -541,6 +575,11 @@ if __name__ == '__main__':
     SVM = LinearSVC(penalty='l2', loss='squared_hinge', dual=True, tol=0.0001,\
             C=C, multi_class='ovr', fit_intercept=True, intercept_scaling=1,\
             class_weight='balanced', verbose=0, random_state=None, max_iter=1000)
+
+    plot_learning = True
+    if plot_learning:
+        splits = np.linspace(0.1, 0.9, 100)
+        me.generate_learning_curve(SVM, X_train, y_train, splits)
 
     SVM_y_pred, SVM_test_acc, SVM_test_prec, SVM_test_rec, SVM_test_time = me.test(SVM, y_test, X_test)
     me.print_scores(dp, SVM_test_acc, SVM_test_prec, SVM_test_rec)
