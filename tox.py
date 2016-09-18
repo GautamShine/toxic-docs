@@ -103,16 +103,18 @@ class DataProcessor():
                 'scientific_article_unpublished': 8,
                 'scientific_article_published': 9,
                 'advertisement': 10, 'trade_association': 11,
-                'contract': 12, 'budget':13,
-                'court_transcript':14, 'general_report':15,
-                'not_english':18, 'misc':19, 'blank':20}
+                'contract': 12, 'budget': 13,
+                'court_transcript': 14, 'general_report': 15,
+                'not_english': 18, 'misc': 19, 'blank': 20}
         self.inv_label_dict = {v: k for k, v in self.label_dict.items()}
+        self.label_index_list = sorted(list(self.inv_label_dict.keys()))
+        self.label_name_list = sorted(self.label_dict.keys(), key=lambda x: self.label_dict[x])
 
     """
     Takes a bson and returns the corresponding list of dicts, the frequency of
     each label, and the number of unlabeled items
     """
-    def load_bson(self, bson_file, plot_hist=False):
+    def load_bson(self, bson_file):
 
         # 'rb' for read as binary
         f = open(bson_file, 'rb')
@@ -128,20 +130,6 @@ class DataProcessor():
             except:
                 labels[i] = -1
                 counts['unlabeled'] += 1
-
-        if(plot_hist):
-
-            x = np.arange(len(counts))
-            y = counts.values()
-            ymax = max(y)*1.1
-
-            plt.figure()
-            plt.bar(x, y, align='center', width=0.5)
-            plt.ylim(0, ymax)
-            plt.xticks(x, counts.keys(), rotation=45, ha='right')
-            rcParams.update({'figure.autolayout': True, 'font.size': 30})
-
-            plt.show()
 
         return docs, labels, counts
 
@@ -224,12 +212,12 @@ class DataProcessor():
     def merge_classes(self, merge_arr, y):
 
         y_merged = y.copy()
-        merged_dict = {}
+        dict_merged = {}
 
         for y_1, y_2 in merge_arr:
             pass
 
-        return y_merged, merged_dict
+        return y_merged, dict_merged
 
 """
 Utility functions for training and testing sklearn models
@@ -266,14 +254,14 @@ class ModelEvaluator():
     """
     Tests a given fitted classifier
     """
-    def test(self, model, y_test, X_test, labels=None):
+    def test(self, model, y_test, X_test, label_indices=None):
 
         t0 = time.time()
         y_pred = model.predict(X_test)
         test_time = time.time() - t0
         test_accuracy = metrics.accuracy_score(y_test, y_pred)
-        test_precision = metrics.precision_score(y_test, y_pred, labels=labels, average=None)
-        test_recall = metrics.recall_score(y_test, y_pred, labels=labels, average=None)
+        test_precision = metrics.precision_score(y_test, y_pred, labels=label_indices, average=None)
+        test_recall = metrics.recall_score(y_test, y_pred, labels=label_indices, average=None)
 
         return y_pred, test_accuracy, test_precision, test_recall, test_time
 
@@ -335,7 +323,7 @@ class SemiSupervisedLearner():
     def propagate_labels(self, y_working, X_working, y_pred, X_unlab,\
             conf_scores, conf_thresh=1.5):
 
-        if type(conf_thresh) is not float:
+        if type(conf_thresh) == np.ndarray:
             # differing thresholds for classes
             add_set = np.zeros_like(y_pred, dtype=bool)
             for i in range(conf_thresh.shape[0]):
@@ -403,19 +391,20 @@ class DataAnalyzer():
     """
     Plot histogram of classes given a y vector
     """
-    def class_hist(self, y, labels, print_hist, show_now=False):
+    def class_hist(self, y, label_indices, label_names, print_hist=False, show_now=False):
 
         counts = np.bincount(y)
+        counts = [counts[i] for i in range(len(counts)) if i in label_indices]
 
         x = np.arange(len(counts))
         ymax = max(counts)*1.1
 
         self.fig_num += 1
-        plt.figure(self.fig_num)
+        plt.figure(self.fig_num, figsize=(12, 10))
         plt.bar(x, counts, align='center', width=0.5)
         plt.ylim(0, ymax)
-        plt.xticks(x, labels, rotation=45, ha='right')
-        rcParams.update({'figure.autolayout': True, 'font.size': 25})
+        plt.xticks(x, label_names, rotation=45, ha='right')
+        rcParams.update({'figure.autolayout': True, 'font.size': 20})
 
         if print_hist:
             print(counts)
@@ -428,23 +417,22 @@ class DataAnalyzer():
     """
     Plot scores of classes in a bar chart
     """
-    def class_scores(self, scores, labels, show_now=False):
+    def class_scores(self, scores, label_names, show_now=False):
 
         if type(scores) is tuple:
             prec, rec = scores
             scores = np.array([2/(1/prec[i] + 1/rec[i])\
                     for i in range(len(prec))])
 
-        x = np.arange(len(labels))
+        x = np.arange(len(label_names))
         ymax = max(scores)*1.1
 
         self.fig_num += 1
-        plt.figure(self.fig_num)
-        print(x, x.shape, scores, scores.shape)
+        plt.figure(self.fig_num, figsize=(12,10))
         plt.bar(x, scores, align='center', width=0.5)
         plt.ylim(0, ymax)
-        plt.xticks(x, labels, rotation=45, ha='right')
-        rcParams.update({'figure.autolayout': True, 'font.size': 25})
+        plt.xticks(x, label_names, rotation=45, ha='right')
+        rcParams.update({'figure.autolayout': True, 'font.size': 20})
 
         if show_now:
             plt.show()
@@ -465,15 +453,15 @@ class DataAnalyzer():
     """
     Retrieve the most important features for predicting a given class
     """
-    def important_feats(self, model, feat_names, labels, num_feats=5):
+    def important_feats(self, model, feat_names, label_names, num_feats=5):
 
         feat_ranking = np.argsort(-model.coef_, axis=1)
         if type(feat_names) is list:
             feat_names = np.array(feat_names)
 
-        for i in range(len(labels)):
+        for i in range(len(label_names)):
 
-            print(labels[i])
+            print(label_names[i])
             print(feat_names[feat_ranking[i,:]][:num_feats])
 
         return
@@ -543,21 +531,26 @@ if __name__ == '__main__':
     da = DataAnalyzer(text_key)
     docs, y_all, counts = dp.load_bson(bson_file)
     t0 = time.time()
-    vectorizer, X_all_ngram, feat_names = dp.vectorize(docs, min_df=2, max_ngram=2)
+    vectorizer, X_all_ngram, feat_names = dp.vectorize(docs, min_df=5, max_ngram=2)
     vec_time = time.time() - t0
+
+    # Replace regex labels with human labels
+    y_all = np.loadtxt('labels.txt', dtype=np.int32)
+    counts = np.bincount(y_all[y_all != -1])
+    counts = [counts[i] for i in range(len(counts)) if i in dp.label_index_list]
 
     # Add extra features from ToxicDocs to n-gram data matrix
     key_list = ['num_pages']
     feats = dp.get_feats(docs, key_list)
     X_all = dp.stack_feats(X_all_ngram, feats)
+    feat_names.extend(key_list.append('length'))
+
+    print('Vectorization time:', vec_time)
+    print('Data matrix size:', X_all.shape)
 
     y_train, X_train, ind_train, y_test, X_test, ind_test, X_unlab, ind_unlab =\
             dp.split_data(y_all, X_all, split=0.7, seed=0)
     me = ModelEvaluator()
-
-    print('Vectorization time:', vec_time)
-    print('Data matrix size:', X_all.shape)
-    print(dp.label_dict, '\n')
 
     # LinearSVC (liblinear SVM implementation, one-v-all)
     cross_validate = True
@@ -578,10 +571,11 @@ if __name__ == '__main__':
 
     plot_learning = True
     if plot_learning:
-        splits = np.linspace(0.1, 0.9, 100)
+        splits = np.linspace(0.1, 0.9, 300)
         me.generate_learning_curve(SVM, X_train, y_train, splits)
 
-    SVM_y_pred, SVM_test_acc, SVM_test_prec, SVM_test_rec, SVM_test_time = me.test(SVM, y_test, X_test)
+    SVM_y_pred, SVM_test_acc, SVM_test_prec, SVM_test_rec, SVM_test_time =\
+            me.test(SVM, y_test, X_test, label_indices=dp.label_index_list)
     me.print_scores(dp, SVM_test_acc, SVM_test_prec, SVM_test_rec)
 
     # Perform semisupervised learning
@@ -589,5 +583,6 @@ if __name__ == '__main__':
     ave_conf = np.mean(ssl.confidence_scores(SVM.decision_function(X_train)))
     y_working = ssl.loop_learning(X_unlab, y_train, X_train, num_loops=10, conf_thresh=ave_conf)
 
-    SSL_y_pred, SSL_test_acc, SSL_test_prec, SSL_test_rec, SSL_test_time = me.test(SVM, y_test, X_test)
+    SSL_y_pred, SSL_test_acc, SSL_test_prec, SSL_test_rec, SSL_test_time =\
+            me.test(SVM, y_test, X_test, label_indices=dp.label_index_list)
     me.print_scores(dp, SSL_test_acc, SSL_test_prec, SSL_test_rec)
