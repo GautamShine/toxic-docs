@@ -53,6 +53,15 @@ class ModelEvaluator():
 
         return y_pred, test_accuracy, test_precision, test_recall, test_time
 
+    def top_3_acc(self, model, y_test, X_test):
+
+        # get hyperplane distances
+        hp_dists = model.decision_function(X_test)
+        top_3 = np.argsort(-hp_dists, axis=1)[:3,:]
+        top_3_bool = y_pred.apply_along_axis()
+
+        return top_3_score
+
     """
     Traces a learning curve
     """
@@ -120,6 +129,7 @@ class SemiSupervisedLearner():
             # same threshold for all classes
             add_set = conf_scores > conf_thresh
 
+        #print(np.unique(y_working))
         y_working = np.concatenate((y_working, y_pred[add_set]))
         X_working = sp.vstack((X_working, X_unlab[add_set]))
         X_unlab = X_unlab[~add_set]
@@ -129,7 +139,7 @@ class SemiSupervisedLearner():
     """
     Iterates the model and data to grow the training set using soft labels
     """
-    def loop_learning(self, X_unlab, y_train, X_train, num_loops, conf_thresh):
+    def loop_learning(self, X_unlab, y_train, X_train, label_indices, num_loops, conf_thresh):
 
         X_working = X_train.copy()
         y_working = y_train.copy()
@@ -137,10 +147,9 @@ class SemiSupervisedLearner():
 
         for i in range(num_loops):
 
-            self.model.fit(X_working, y_working)
-
             hp_dists = self.model.decision_function(X_unlab)
-            y_pred = np.argmax(hp_dists, axis=1)
+            y_pred_ind = np.argmax(hp_dists, axis=1).reshape(-1,1)
+            y_pred = np.apply_along_axis(lambda x: label_indices[x], 1, y_pred_ind)
             conf_scores = self.confidence_scores(hp_dists)
 
             y_size_old = y_working.shape[0]
@@ -154,5 +163,7 @@ class SemiSupervisedLearner():
 
             num_added += y_working.shape[0] - y_size_old
             print(num_added, y_working.shape[0], X_unlab.shape[0])
+
+            self.model.fit(X_working, y_working)
 
         return y_working
