@@ -77,15 +77,20 @@ if __name__ == '__main__':
         splits = np.linspace(0.1, 0.9, 300)
         me.generate_learning_curve(SVM, X_train, y_train, splits)
 
+    SVM_train_acc, SVM_train_time = me.train(SVM, y_train, X_train)
     SVM_y_pred, SVM_test_acc, SVM_test_prec, SVM_test_rec, SVM_test_time =\
-            me.test(SVM, y_test, X_test, label_indices=dp.label_index_list)
+            me.test(SVM, y_test, X_test, dp.label_index_list)
     me.print_scores(dp, SVM_test_acc, SVM_test_prec, SVM_test_rec)
+
+    t_n_score, top_n_vec = me.top_n_acc(SVM, y_test, X_test, dp.label_index_list, n=3)
+    print(top_n_score)
 
     # Perform semisupervised learning
     ssl = SemiSupervisedLearner(SVM)
     ave_conf = np.mean(ssl.confidence_scores(SVM.decision_function(X_train)))
-    y_working = ssl.loop_learning(X_unlab, y_train, X_train, num_loops=10, conf_thresh=ave_conf)
 
+    y_working = ssl.loop_learning(X_unlab, y_train, X_train, dp.label_index_list,\
+            num_loops=1, conf_thresh=3*ave_conf)
     SSL_y_pred, SSL_test_acc, SSL_test_prec, SSL_test_rec, SSL_test_time =\
-            me.test(SVM, y_test, X_test, label_indices=dp.label_index_list)
+            me.test(SVM, y_test, X_test, dp.label_index_list)
     me.print_scores(dp, SSL_test_acc, SSL_test_prec, SSL_test_rec)

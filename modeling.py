@@ -42,7 +42,7 @@ class ModelEvaluator():
     """
     Tests a given fitted classifier
     """
-    def test(self, model, y_test, X_test, label_indices=None):
+    def test(self, model, y_test, X_test, label_indices):
 
         t0 = time.time()
         y_pred = model.predict(X_test)
@@ -53,14 +53,26 @@ class ModelEvaluator():
 
         return y_pred, test_accuracy, test_precision, test_recall, test_time
 
-    def top_3_acc(self, model, y_test, X_test):
+    """
+    Computes the prediction accuracy when allowing n guesses for each sample
+    """
+    def top_n_acc(self, model, y_test, X_test, label_indices, n=3):
+
+        to_label = np.vectorize(lambda x: label_indices[x])
 
         # get hyperplane distances
         hp_dists = model.decision_function(X_test)
-        top_3 = np.argsort(-hp_dists, axis=1)[:3,:]
-        top_3_bool = y_pred.apply_along_axis()
+        y_pred_ind = np.argsort(-hp_dists, axis=1)
+        y_pred = to_label(y_pred_ind[:,:n])
 
-        return top_3_score
+        # tests if y is in the set of top n y_hat
+        top_n_bool = np.apply_along_axis(lambda x: len(set(x)) == n, 1,\
+                np.hstack((y_pred, y_test.reshape(-1,1))))
+
+        # compute percent that are True
+        top_n_score = np.sum(top_n_bool)/top_n_bool.shape[0]
+
+        return top_n_score, top_n_bool
 
     """
     Traces a learning curve
@@ -141,15 +153,20 @@ class SemiSupervisedLearner():
     """
     def loop_learning(self, X_unlab, y_train, X_train, label_indices, num_loops, conf_thresh):
 
+        X_unlab = X_unlab.copy()
         X_working = X_train.copy()
         y_working = y_train.copy()
         num_added = 0
 
+        self.model.fit(X_working, y_working)
+
+        to_label = np.vectorize(lambda x: label_indices[x])
+
         for i in range(num_loops):
 
             hp_dists = self.model.decision_function(X_unlab)
-            y_pred_ind = np.argmax(hp_dists, axis=1).reshape(-1,1)
-            y_pred = np.apply_along_axis(lambda x: label_indices[x], 1, y_pred_ind)
+            y_pred_ind = np.argmax(hp_dists, axis=1)
+            y_pred = to_label(y_pred_ind)
             conf_scores = self.confidence_scores(hp_dists)
 
             y_size_old = y_working.shape[0]

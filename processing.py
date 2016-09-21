@@ -20,9 +20,12 @@ NLP functions (NER, lemmatization) for obtaining clean tokens
 """
 class NLP():
 
-    def __init__(self, num_chars):
+    def __init__(self, num_chars, replace_ne=True):
         self.spacy = English()
+        # only consider this many characters from beginning/end of documents
         self.num_chars = num_chars
+        # replace named entities with generics
+        self.replace_ne = replace_ne
 
     """
     Normalizes emails, people, places, and organizations
@@ -31,20 +34,70 @@ class NLP():
 
         # normalize emails
         if token.like_email:
-            return 'local@domain'
+            return 'ne_email'
 
-        # normalize names
-        elif token.ent_type == 346:
-            return 'ne_person'
+        # check that the NER IOB tag is B
+        if self.replace_ne and token.ent_iob == 3:
 
-        # normalize places
-        elif token.ent_type == 350 or token.ent_type == 351:
-            return 'ne_place'
+            ent = token.ent_type_
 
-        # normalize organizations
-        elif token.ent_type == 349:
-            return 'ne_org'
+            # normalize human names
+            if ent == 'PERSON':
+                return 'ne_person'
 
+            # normalize national/religious/political groups
+            elif ent == 'NORP':
+                return 'ne_group'
+
+            # normalize facilities
+            elif ent == 'FAC':
+                return 'ne_facility'
+
+            # normalize organizations
+            elif ent == 'ORG':
+                return 'ne_org'
+
+            # normalize geopolitical places
+            elif ent == 'GPE':
+                return 'ne_gpe_place'
+            
+            # normalize natural places
+            elif ent == 'LOC':
+                return 'ne_nat_place'
+
+            # normalize products
+            elif ent == 'PRODUCT':
+                return 'ne_product'
+
+            # normalize laws
+            elif ent == 'LAW':
+                return 'ne_law'
+
+            # normalize dates
+            elif ent == 'DATE':
+                return 'ne_date'
+
+            # normalize time
+            elif ent == 'TIME':
+                return 'ne_time'
+
+            # normalize percentages
+            elif ent == 'PERCENT':
+                return 'ne_percent'
+
+            # normalize money
+            elif ent == 'MONEY':
+                return 'ne_money'
+
+            # normalize quantity
+            elif ent == 'QUANTITY':
+                return 'ne_quant'
+
+        # normalize numbers that aren't time/money/quantity/etc
+        if token.is_digit:
+            return 'ne_number'
+
+        # return lemma for regular words
         return token.lemma_
 
     """
@@ -59,9 +112,9 @@ class NLP():
                 spacy_doc = self.spacy(doc)
                 
             return [self.preprocessor(t) for t in spacy_doc \
-                    if (t.is_alpha or t.like_email) \
-                    and len(t) < 50 and len(t) > 2 \
-                    and not (t.is_punct or t.is_stop)]
+                    if (t.is_alpha or t.like_num or t.like_email) \
+                    and len(t) < 50 and len(t) > 1 \
+                    and not (t.is_punct or t.is_space or t.is_stop)]
         except:
             print(doc)
             raise('Error: failed to tokenize a document')
@@ -75,7 +128,7 @@ class DataProcessor():
     def __init__(self, text_key, label_key, num_chars):
         self.text_key = text_key
         self.label_key = label_key
-        self.nlp = NLP(num_chars)
+        self.nlp = NLP(num_chars, replace_ne=True)
         self.label_dict = {'email': 0, 'internal_memo': 1,
                 'boardroom_minutes': 2, 'annual_report': 3,
                 'public_relations': 4, 'general_correspondance': 5,
