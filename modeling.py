@@ -77,9 +77,9 @@ class ModelEvaluator():
     """
     Traces a learning curve
     """
-    def generate_learning_curve(self, model, X, y, splits=np.linspace(0.1,0.9,18), plot_curve=False):
+    def generate_learning_curve(self, model, X, y, splits=np.linspace(0.1,0.9,18), cv=3, plot_curve=False):
 
-        train_sizes, train_scores, test_scores = learning_curve(model, X, y, splits)
+        train_sizes, train_scores, test_scores = learning_curve(model, X, y, splits, cv)
 
         if plot_curve:
             plt.figure()

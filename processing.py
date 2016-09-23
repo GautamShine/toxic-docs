@@ -32,70 +32,72 @@ class NLP():
     """
     def preprocessor(self, token):
 
-        # normalize emails
-        if token.like_email:
-            return 'ne_email'
+        if self.replace_ne:
 
-        # check that the NER IOB tag is B
-        if self.replace_ne and token.ent_iob == 3:
+            # normalize emails
+            if token.like_email:
+                return 'ne_email'
 
-            ent = token.ent_type_
+            # check that the NER IOB tag is B
+            if token.ent_iob == 3:
 
-            # normalize human names
-            if ent == 'PERSON':
-                return 'ne_person'
+                ent = token.ent_type_
 
-            # normalize national/religious/political groups
-            elif ent == 'NORP':
-                return 'ne_group'
+                # normalize human names
+                if ent == 'PERSON':
+                    return 'ne_person'
 
-            # normalize facilities
-            elif ent == 'FAC':
-                return 'ne_facility'
+                # normalize national/religious/political groups
+                elif ent == 'NORP':
+                    return 'ne_group'
 
-            # normalize organizations
-            elif ent == 'ORG':
-                return 'ne_org'
+                # normalize facilities
+                elif ent == 'FAC':
+                    return 'ne_facility'
 
-            # normalize geopolitical places
-            elif ent == 'GPE':
-                return 'ne_gpe_place'
-            
-            # normalize natural places
-            elif ent == 'LOC':
-                return 'ne_nat_place'
+                # normalize organizations
+                elif ent == 'ORG':
+                    return 'ne_org'
 
-            # normalize products
-            elif ent == 'PRODUCT':
-                return 'ne_product'
+                # normalize geopolitical places
+                elif ent == 'GPE':
+                    return 'ne_gpe_place'
+                
+                # normalize natural places
+                elif ent == 'LOC':
+                    return 'ne_nat_place'
 
-            # normalize laws
-            elif ent == 'LAW':
-                return 'ne_law'
+                # normalize products
+                elif ent == 'PRODUCT':
+                    return 'ne_product'
 
-            # normalize dates
-            elif ent == 'DATE':
-                return 'ne_date'
+                # normalize laws
+                elif ent == 'LAW':
+                    return 'ne_law'
 
-            # normalize time
-            elif ent == 'TIME':
-                return 'ne_time'
+                # normalize dates
+                elif ent == 'DATE':
+                    return 'ne_date'
 
-            # normalize percentages
-            elif ent == 'PERCENT':
-                return 'ne_percent'
+                # normalize time
+                elif ent == 'TIME':
+                    return 'ne_time'
 
-            # normalize money
-            elif ent == 'MONEY':
-                return 'ne_money'
+                # normalize percentages
+                elif ent == 'PERCENT':
+                    return 'ne_percent'
 
-            # normalize quantity
-            elif ent == 'QUANTITY':
-                return 'ne_quant'
+                # normalize money
+                elif ent == 'MONEY':
+                    return 'ne_money'
 
-        # normalize numbers that aren't time/money/quantity/etc
-        if token.is_digit:
-            return 'ne_number'
+                # normalize quantity
+                elif ent == 'QUANTITY':
+                    return 'ne_quant'
+
+            # normalize numbers that aren't time/money/quantity/etc
+            if token.is_digit:
+                return 'ne_number'
 
         # return lemma for regular words
         return token.lemma_
@@ -125,10 +127,10 @@ Data transformation functions to go from database dump to text features
 """
 class DataProcessor():
 
-    def __init__(self, text_key, label_key, num_chars):
+    def __init__(self, text_key, label_key, num_chars, replace_ne=True):
         self.text_key = text_key
         self.label_key = label_key
-        self.nlp = NLP(num_chars, replace_ne=True)
+        self.nlp = NLP(num_chars, replace_ne=replace_ne)
         self.label_dict = {'email': 0, 'internal_memo': 1,
                 'boardroom_minutes': 2, 'annual_report': 3,
                 'public_relations': 4, 'general_correspondance': 5,
@@ -245,14 +247,42 @@ class DataProcessor():
         return y_train, X_train, ind_train, y_test, X_test, ind_test, X_unlab, ind_unlab
 
     """
-    Merges given classes into one label for cases when sample size is small
+    Merges pairs of classes given in the form [(a,b), (c,d), ...]
     """
-    def merge_classes(self, merge_arr, y):
+    def merge_classes(self, merge_list, y):
 
         y_merged = y.copy()
-        dict_merged = {}
 
-        for y_1, y_2 in merge_arr:
-            pass
+        for y1, y2 in merge_list:
+            y_merged[y_merged == y2] = y1
+            self.label_index_list.remove(y2)
+            self.label_name_list.remove(self.inv_label_dict[y2])
+            self.label_dict.pop(self.inv_label_dict[y2], None)
+            self.inv_label_dict.pop(y2, None)
 
-        return y_merged, dict_merged
+        return y_merged
+
+    """
+    Returns a measure of OCR quality of each document
+    """
+    def ocr_quality(self, docs):
+
+        ocr_quality = np.zeros(len(docs))
+
+        for i,doc in enumerate(docs):
+
+            spacy_doc = self.nlp.spacy(doc[self.text_key])
+            num_tokens = 0
+            num_valid = 0
+
+            for token in spacy_doc:
+                num_tokens += 1
+                if not token.is_oov:
+                    num_valid += 1
+
+            if num_tokens == 0:
+                ocr_quality[i] = -1
+            else:
+                ocr_quality[i] = num_valid/num_tokens
+
+        return ocr_quality
