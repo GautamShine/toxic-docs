@@ -121,6 +121,25 @@ class NLP():
             print(doc)
             raise('Error: failed to tokenize a document')
 
+    """
+    Set-based tokenizer, i.e. count and word order are destroyed
+    """
+    def set_tokenizer(self, doc):
+
+        try:
+            if len(doc) > self.num_chars:
+                spacy_doc = self.spacy(doc[:self.num_chars])
+            else:
+                spacy_doc = self.spacy(doc)
+                
+            return {self.preprocessor(t) for t in spacy_doc \
+                    if (t.is_alpha or t.like_num or t.like_email) \
+                    and len(t) > 1 \
+                    and not (t.is_punct or t.is_space or t.is_stop)}
+        except:
+            print(doc)
+            raise('Error: failed to tokenize a document')
+
 
 """
 Data transformation functions to go from database dump to text features
