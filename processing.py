@@ -146,7 +146,7 @@ Data transformation functions to go from database dump to text features
 """
 class DataProcessor():
 
-    def __init__(self, text_key, label_key, num_chars, replace_ne=True):
+    def __init__(self, text_key, label_key, num_chars=300, replace_ne=True):
         self.text_key = text_key
         self.label_key = label_key
         self.nlp = NLP(num_chars, replace_ne=replace_ne)

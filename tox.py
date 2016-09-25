@@ -16,7 +16,6 @@ from modeling import *
 from analyzing import *
 
 import time
-import numpy as np
 from sklearn.svm import LinearSVC
 
 """
