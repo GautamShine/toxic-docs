@@ -15,6 +15,7 @@ from processing import *
 from modeling import *
 from analyzing import *
 
+import seaborn as sns
 import time
 from sklearn.svm import LinearSVC
 
@@ -71,41 +72,66 @@ class TrendAnalyzer():
         return
 
     """
-    Computes a histogram of word appearence by year
+    Computes the document count of a topic over time
     """
-    def word_trend(self, word, plot=False):
+    def topic_trend(self, word, doc_type, colors, label_names,\
+            x_min=1900, x_max=2016, fname='trend.png'):
 
-        # lemmatize the word
-        word = self.nlp.spacy(word)[0].lemma_
-        
-        # compute series of appearance counts
-        year_counts = self.df.groupby(['inferred_document_type', 'inferred_year'])\
-                ['tokens'].apply(lambda x: np.sum([word in y for y in x]))
+        year_counts = self.df.groupby(['inferred_document_type',\
+                'inferred_year'])['tokens'].apply(lambda x: \
+                np.sum([word in y for y in x]))
 
-        if plot:
-            
-            plt.figure(figsize=(10,6))
-            doc_type = [1,6,8,9]
-            colors=['-r', '-g', '-b', '-k']
-            max_count = 0
-            
-            for i,dt in enumerate(doc_type):
-                try:
-                    x = year_counts[dt].index
-                    y = year_counts[dt].values
-                    if np.amax(y) > max_count:
-                        max_count = np.amax(y)
-                    plt.plot(x, y, colors[i])
-                except:
-                    pass
+        x_vals = np.arange(x_min, x_max + 1, dtype=int)
+        y_vals = np.zeros((x_max - x_min + 1, len(doc_type)))
 
-            axes = plt.gca()
-            axes.set_xlim([1940,2016])
-            axes.set_ylim([0,max_count*1.2])            
-            plt.show()
+        for i,dt in enumerate(doc_type):
+            try:
+                x = year_counts[dt].index.astype(int)
+                y = year_counts[dt].values
+                y = y[(x >= x_min) * (x <= x_max)]
+                x = x[(x >= x_min) * (x <= x_max)]
+                y_vals[x - x_min, i] = y
+
+            except Exception as e:
+                print(e)
+
+        y_sum = np.zeros_like(y_vals)
+        for i in range(y_vals.shape[1]-1,-1,-1):
+            y_sum[:,i] = np.sum(y_vals[:,:i+1], axis=1)
+
+        sns.set_style("whitegrid")
+        sns.set_context({"figure.figsize": (24, 10)})
+
+        for i in range(y_vals.shape[1]-1, -1, -1):
+            sbp = sns.barplot(x=x_vals, y=y_sum[:,i],\
+                    color=colors[i], saturation=0.75)
+
+        plt.setp(sbp.patches, linewidth=0)
+
+        legends = []
+        for i in range(y_vals.shape[1]):
+            legends.append(plt.Rectangle((0,0),1,1,fc=colors[i], edgecolor='none'))
+
+        l = plt.legend(legends, label_names, loc=1, ncol=1, prop={'size':32})
+        l.draw_frame(False)
+
+        title = r'"' + word + r'" ' + str(x_min) + ' - ' + str(x_max)
+
+        sns.despine(left=True)
+        sbp.set_title(title, fontsize=48, fontweight='bold')
+
+        plt.xticks(rotation=45)
+
+        for item in ([sbp.xaxis.label] +
+                     sbp.get_xticklabels()):
+            item.set_fontsize(24)
+
+        for item in ([sbp.yaxis.label] +
+                     sbp.get_yticklabels()):
+            item.set_fontsize(28)
+
+        plt.savefig(fname)
             
-        return year_counts
-        
     """
     Computes indices of most similar documents in n-gram space
     """
@@ -125,10 +151,10 @@ if __name__ == '__main__':
     text_key = 'text'
 
     # Process the raw data
-    dp = DataProcessor(text_key, label_key, num_chars=3, replace_ne=True)
+    dp = DataProcessor(text_key, label_key, num_chars=300, replace_ne=True)
     da = DataAnalyzer(text_key)
     docs, y_regex, counts_regex = dp.load_bson(bson_file)
-    ta = TrendAnalyzer(docs, num_chars=10, init_now=True)
+    ta = TrendAnalyzer(docs, num_chars=1000, init_now=True)
 
     t0 = time.time()
     ta.create_token_sets()
@@ -206,4 +232,11 @@ if __name__ == '__main__':
         sim_time = time.time() - t0
         print('Similarity computation time', sim_time)
 
-    wt = ta.word_trend('vinyl', plot=True)
+    x_min = 1957
+    x_max = 1992
+    doc_type = [1,8,9,6]
+    label_names = ['Internal Memo', 'Internal Study', 'Published Study', 'News']
+    colors = ["#003399", "#6699ff", "#ff99cc", "#ff0066"]
+
+    ta.topic_trend('vinyl', doc_type, colors, label_names,\
+            x_min, x_max, fname='trend.png')

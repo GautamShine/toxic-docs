@@ -1,2 +1,2 @@
 # toxic-docs
-Document analysis and categorization for the ToxicDocs repository
+Document analysis and classification for the ToxicDocs collection
