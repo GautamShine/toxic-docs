@@ -2,7 +2,7 @@
 <html lang="en-us">
     <head>
         <meta charset="UTF-8">
-        <title>ToxicDocs by GautamShine</title>
+        <title>ToxicDocs by Gautam Shine</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <link rel="stylesheet" type="text/css" href="stylesheets/normalize.css" media="screen">
         <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,700' rel='stylesheet' type='text/css'>
@@ -21,33 +21,137 @@
         <section class="main-content">
             <h1>
                 <a id="toxicdocs" class="anchor" href="#toxicdocs" aria-hidden="true"><span aria-hidden="true" class="octicon octicon-link"></span></a>ToxicDocs</h1>
+            Project ToxicDocs is a multi-institution collaboration headed by Columbia, CUNY, and the Center for Public Integrity.<sup>[1]</sup> It aims to make previously classified environmental health documents from legal cases available to the public. The project possesses a growing collection of several million documents. Scientists, journalists, environmentalists, and many others could make use of this rich collection – but to make it accessible we must first bring structure to it.
+            <br>
+            <br>
             <center>
-                <img src="graphics/0_multiple_docs.png" alt="ToxicDocs Collection" style="width:450px;">
-
+                <img src="graphics/0_multiple_docs.png" alt="ToxicDocs Collection" style="width:850px;">
                 <br>
-
-                <img src="graphics/1_tox_asbestos.png" alt="Asbestos Document" style="width:304px;">
-
-                <br>
-
-                <img src="graphics/2_ocr_bad.png" alt="OCR Example" style="width:304px;">
-
-                <br>
-
-                <img src="graphics/3_ocr_histogram.png" alt="OCR Quality Histogram" style="width:550px;">
-
-                <br>
-
-                <img src="graphics/4_class_hist.png" alt="Distribution of Classes" style="width:550px;">
-
-                <br>
-
-                <img src="graphics/5_svm_learning_curve.png" alt="SVM Learning Curve" style="width:550px;">
-
-                <br>
-
-                <img src="graphics/6_vinyl.png" alt="Trend for Vinyl" style="width:850px;">
+                <i>Examples of documents in the collection.</i>
             </center>
+            <br>
+            <br>
+            I set out to do 4 tasks to help make this happen:
+            <br>
+            <br>
+            (1) Categorize documents into types such as memo, ad, scientific study
+            <br>
+            (2) Provide retrieval of documents similar to a given one
+            <br>
+            (3) Infer missing attributes (such as the year) by parsing text
+            <br>
+            (4) Visualize trends for topics over time
+            <br>
+            <br>
+            The first task proved to be the most challenging. Categorizing by document type is not quite the same as topic modeling (e.g. by Latent Dirichlet Allocation) because different document types are not necessarily characterized by distinctive vocabulary clusters. Rather, it is the structure of the document that gives it away. Since unsupervised learning won’t work, I turned to supervised learning.
+            <br>
+            <br>
+            This requires some labeling to obtain a training set. But first, what features and which model should be used? A useful feature set for text classification is the n-gram set (which includes all word sequences of length <i>n</i> that occur in a given document). This destroys word order and doesn’t attempt any semantic understanding of the content, but gaining that requires the use of embeddings produced by neural nets. And even then, high quality embeddings are only available at the level of words (word2vec) or sentences (Skip-Thought).
+            <br>
+            <br>
+            With no ground truth available, I decided n-grams provided the best bang for the buck as I’d only have to label a few hundred documents to get started. The support vector classifier with a linear kernel is well-suited to this task. N-gram features are high-dimensional and exhibit sparsity. Under these conditions, separation by a hyperplane is often attainable. There’s the question of <i>which</i> hyperplane among all choices to use, and the SVM heuristic of trading margin against misclassification is a very reasonable one. I used the liblinear SVM implementation.<sup>[2]</sup>
+            <br>
+            <br>
+            <center>
+                <img src="graphics/5_svm_2d.png" alt="SVM in 2 Dimensions" style="width:450px;">
+                <br>
+                <i>An example of a boundary in 2D found by an SVM. The feature space in this work is much larger.</i>
+            </center>
+            <br>
+            <br>
+            A technical note on kernel choice: since n-grams are already very high dimensional, the RBF kernel provides little benefit over the linear kernel. In fact, its tendency to produce complex boundaries leads to high variance with small training sets so it’s often outperformed by the linear kernel on text classification tasks. Moreover, training with the RBF kernel has a time complexity of <i>O(n<sup>2</sup>p)</i> using the SMO algorithm compared to <i>O(np)</i> for the linear kernel using SGD on the primal or dual objective.
+            <br>
+            <br>
+            <center>
+                <img src="graphics/b3_linear.png" alt="Linear Kernel" style="width:400px;">
+                <img src="graphics/b3_rbf.png" alt="RBF Kernel" style="width:400px;">
+                <br>
+                <i>The points in n-gram space look more like the situation on the left (linear) than on the right (RBF).</i>
+            </center>
+            <br>
+            <br>
+            The text in the ToxicDocs collection can be a bit messy because most of these documents are several decades old. The raw scans are available, but performing NLP requires applying optical character recognition (OCR) on them. The results can be hit or miss as even relatively nice-looking scans can render gibberish. Below is an example document and the unfortunate OCR text that results.
+            <br>
+            <br>
+            <center>
+                <img src="graphics/2_ocr_bad_slide.png" alt="OCR Example" style="width:850px;">
+                <br>
+                <i>The raw scan (left) v. the OCR text (right).</i>
+            </center>
+            <br>
+            <br>
+            Nevertheless, most documents have over 60% of their text bring readable as shown in the histogram below, where I’ve used the percent of tokens that are in-vocabulary as the OCR quality metric.
+            <br>
+            <br>
+            <center>
+                <img src="graphics/3_ocr_histogram.png" alt="OCR Quality Histogram" style="width:550px;">
+                <br>
+                <i>Histogram of the OCR quality as measured by percent of tokens that are in-vocabulary.</i>
+            </center>
+            <br>
+            <br>
+            On to the classification task. Previously, the Columbia group was using a few heuristics with regular expressions to categorize the documents. This turned out to only have 15% accuracy when compared to my manual labeling. The regex approach also only hits about 1/3 of documents, leaving 2/3 unlabeled. To perform supervised learning, I randomly labeled 1,000 documents among the 50,000 document subset I was working with. The classes and their distribution are given below.
+            <br>
+            <br>
+            <center>
+                <img src="graphics/4_class_hist.png" alt="Distribution of Classes" style="width:550px;">
+                <br>
+                <i>The 15 document types classified in this work and their distribution in the training and test sets.</i>
+            </center>
+            <br>
+            <br>
+            To prevent the rarer classes from having low recall, the loss incurred by misclassification during training was set to be inversely proportional to class frequency. A 70/30 train-test split was used and 5-fold cross-validation was performed to select the regularizing hyperparameter <i>C</i> that controls the misclassification penalty.
+            <br>
+            <br>
+            The SVM obtained a classification accuracy of 62% with the correct class within the top 3 predictions 88% of the time (as measured by L<sup>2</sup> distance from the hyperplane). Mean <i>F<sub>1</sub></i> was 0.57, so precision and recall were roughly balanced.
+            <br>
+            <br>
+            The baseline 1 and 2-gram feature set obtained about 56% accuracy. Another +6% was obtained through a few methods. First, stacking the token count of a document and the number of pages it has added information about length and was highly predictive for some classes like scientific studies. Second, I substituted named entities with generic labels. This destroys information, but makes the feature space smaller and denser, which helps with generalization for such a small training set.
+            <br>
+            <br>
+            The third technique was semi-supervised learning. I predicted classes for the unlabeled set and propagated labels onto points that landed deep inside the decision boundary. I then re-trained the SVM on an enlarged training set that included these "soft" labels. This has the potential to <i>reduce</i> model accuracy by absorbing mislabeled examples and fitting to them, but I found it added 1-2% accuracy if a high confidence threshold was used and the process was not repeated.
+            <br>
+            <br>
+            <center>
+                <img src="graphics/5_svm_learning_curve.png" alt="SVM Learning Curve" style="width:550px;">
+                <br>
+                <i>Learning curve for the SVM showing that additional labeling could eke out more performance.</i>
+            </center>
+            <br>
+            <br>
+            Let’s put it all together. While labeling documents, I noticed a few documents about the chemical vinyl chloride (H<sub>2</sub>C=CHCl). Below I’ve put in a search for the word “vinyl” and plotted its appearance count resolved by time and document type. Note that both the <i>x</i> and <i>y</i> axes are predicted rather than given.
+            <br>
+            <br>
+            <center>
+                <img src="graphics/6_vinyl.png" alt="Trend for Vinyl" style="width:850px;">
+                <br>
+                <i>The trend over time for the word "vinyl" resolved by document type.</i>
+            </center>
+            <br>
+            <br>
+            There are 4 types of documents here. The blue-ish ones are internal to companies (memos and unpublished studies) while the pink-ish ones are public (news items and published studies). Why do we see this particular pattern emerge? Let’s break it down by actual historical events.<sup>[3]</sup> The memos and unpublished studies in the late 1960s indicate that industry had turned its attention to vinyl chloride by then (the chemical itself was synthesized in the early 19<sup>th</sup> century).
+            <br>
+            <br>
+            <i>“By 1971 the industry knew without doubt that vinyl chloride caused cancer in animals.”</i>
+            <br>
+            <br>
+            Academic attention picked up in the early 1970s. In 1974, clearly something dramatic happened. That would be the public exposure that vinyl chloride is a carcinogen:
+            <br>
+            <br>
+            <i>“In January 1974, B.F. Goodrich announced the presence of a rare liver cancer, angiosarcoma, in its polyvinyl chloride workers at is Louisville plant.”</i>
+            <br>
+            <br>
+            <i>“In May of 1974, the Occupational Safety and Health Administration (OSHA) proposed a maximum exposure level for vinyl chloride at a no detectable level.”</i>
+            <br>
+            <br>
+            This sequence of events is actually what much of ToxicDocs is about. A common narrative is that a toxic substance was known to be harmful to the chemical industry well before it's exposed as such and gets banned by government agencies. It’s interesting to note that we’ve reconstructed the pattern purely through inference in what started out as an unlabeled document dump.
+            <br>
+            <br>
+            [1] toxicdocs.org
+            <br>
+            [2] scikit-learn.org/stable/modules/generated/sklearn.svm.LinearSVC.html
+            <br>
+            [3] chemicalindustryarchives.org/dirtysecrets/
 
             <footer class="site-footer">
                 <span class="site-footer-owner"><a href="https://github.com/GautamShine/toxic-docs">ToxicDocs</a> is maintained by <a href="https://github.com/GautamShine">GautamShine</a>.</span>
