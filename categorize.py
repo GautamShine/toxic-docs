@@ -37,6 +37,9 @@ if __name__ == '__main__':
 
     # Replace regex labels with human labels
     y_all = np.loadtxt('labels.txt', dtype=np.int32)
+    
+    # Add unkown labels for new set; old = 24085, new = 27829, total = 51914
+    y_all = np.hstack((y_all, -1*np.ones(27829, dtype=np.int32)))
     counts = np.bincount(y_all[y_all != -1])
     counts = [counts[i] for i in range(len(counts)) if i in dp.label_index_list]
 
@@ -66,30 +69,30 @@ if __name__ == '__main__':
         C = grid_best['C']
     else:
         C = 1
+    print('C: ', C)
 
     SVM = LinearSVC(penalty='l2', loss='squared_hinge', dual=True, tol=0.0001,\
             C=C, multi_class='ovr', fit_intercept=True, intercept_scaling=1,\
             class_weight='balanced', verbose=0, random_state=None, max_iter=1000)
 
-    plot_learning = True
+    plot_learning = False
     if plot_learning:
         splits = np.linspace(0.1, 0.9, 300)
         me.generate_learning_curve(SVM, X_train, y_train, splits)
 
+    # Train model on training set and check top 1 test accuracy
     SVM_train_acc, SVM_train_time = me.train(SVM, y_train, X_train)
     SVM_y_pred, SVM_test_acc, SVM_test_prec, SVM_test_rec, SVM_test_time =\
             me.test(SVM, y_test, X_test, dp.label_index_list)
     me.print_scores(dp, SVM_test_acc, SVM_test_prec, SVM_test_rec)
 
-    t_n_score, top_n_vec = me.top_n_acc(SVM, y_test, X_test, dp.label_index_list, n=3)
+    # Print top 3 accuracy
+    top_n_score, top_n_vec = me.top_n_acc(SVM, y_test, X_test, dp.label_index_list, n=3)
     print(top_n_score)
 
-    # Perform semisupervised learning
-    ssl = SemiSupervisedLearner(SVM)
-    ave_conf = np.mean(ssl.confidence_scores(SVM.decision_function(X_train)))
+    # Retrain on all data
+    SVM.fit(sp.vstack((X_train, X_test)), np.hstack((y_train, y_test)))
 
-    y_working = ssl.loop_learning(X_unlab, y_train, X_train, dp.label_index_list,\
-            num_loops=1, conf_thresh=3*ave_conf)
-    SSL_y_pred, SSL_test_acc, SSL_test_prec, SSL_test_rec, SSL_test_time =\
-            me.test(SVM, y_test, X_test, dp.label_index_list)
-    me.print_scores(dp, SSL_test_acc, SSL_test_prec, SSL_test_rec)
+    # Save results to comma-separated text file
+    predictions = SVM.predict(X_all).reshape(1,-1)
+    np.savetxt('predictions.txt', predictions, fmt='%d', delimiter=', ')
