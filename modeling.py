@@ -3,7 +3,7 @@ import numpy as np
 from scipy import sparse as sp
 from matplotlib import pyplot as plt
 
-from sklearn.grid_search import GridSearchCV
+from sklearn.model_selection import GridSearchCV
 from sklearn import metrics
 from sklearn.learning_curve import learning_curve
 
